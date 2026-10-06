@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+
+{% block contenido %}
+<div class="mx-auto max-w-5xl space-y-6">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+        <div><a href="{% url 'ventas:historial' %}" class="text-sm font-semibold text-slate-500 hover:text-cyan-700"><i class="fa-solid fa-arrow-left"></i> Historial</a><h1 class="mt-2 text-3xl font-bold text-slate-900">Factura #{{ venta.pk }}</h1><p class="text-slate-600">{{ venta.fecha_apertura|date:'d/m/Y H:i' }} · {{ venta.sede.nombre }}</p></div>
+        <div class="text-right"><p class="text-sm font-semibold {% if venta.estado == 'PAGADA' %}text-emerald-700{% else %}text-red-700{% endif %}">{{ venta.get_estado_display }} · {{ venta.get_tipo_pago_display }}</p><p class="text-2xl font-bold text-slate-900">Total ${{ total|floatformat:2 }}</p>{% if venta.estado == 'PENDIENTE' %}<p class="font-bold text-red-700">Saldo ${{ saldo|floatformat:2 }}</p>{% endif %}</div>
+    </div>
+
+    <section class="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2"><div><p class="text-xs font-bold uppercase text-slate-500">Cliente</p><p class="font-semibold text-slate-900">{{ venta.cliente.nombre_completo }}</p><p class="text-sm text-slate-600">{{ venta.cliente.cedula_o_rif }}{% if venta.cliente.telefono %} · {{ venta.cliente.telefono }}{% endif %}</p></div><div><p class="text-xs font-bold uppercase text-slate-500">Vendedor</p><p class="font-semibold text-slate-900">{{ venta.vendedor.get_full_name|default:venta.vendedor.username }}</p></div></section>
+
+    <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-50 text-xs uppercase text-slate-600"><tr><th class="px-4 py-3">Producto</th><th class="px-4 py-3 text-right">Cantidad</th><th class="px-4 py-3 text-right">Precio unitario</th><th class="px-4 py-3 text-right">Subtotal</th></tr></thead><tbody class="divide-y divide-slate-100">{% for detalle in venta.detalles.all %}<tr><td class="px-4 py-3 font-semibold">{{ detalle.producto.nombre }}</td><td class="px-4 py-3 text-right">{{ detalle.cantidad }}</td><td class="px-4 py-3 text-right">${{ detalle.precio_unitario|floatformat:2 }}</td><td class="px-4 py-3 text-right">${{ detalle.subtotal|floatformat:2 }}</td></tr>{% endfor %}</tbody></table></div></section>
+
+    {% if venta.abonos.exists %}<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 class="mb-3 text-lg font-bold">Abonos</h2><div class="space-y-2">{% for abono in venta.abonos.all %}<div class="flex flex-wrap justify-between gap-2 border-b border-slate-100 py-2 text-sm"><span>{{ abono.fecha|date:'d/m/Y H:i' }} · {{ abono.metodo_pago }} · recibido en {{ abono.sede_donde_paga.nombre }}</span><strong class="text-emerald-700">${{ abono.monto|floatformat:2 }}</strong></div>{% endfor %}</div></section>{% endif %}
+
+    {% if venta.estado == 'PENDIENTE' %}<div class="flex flex-wrap gap-3"><a href="{% url 'ventas:registrar_abono' venta.pk %}" class="rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white hover:bg-emerald-700"><i class="fa-solid fa-hand-holding-dollar"></i> Registrar abono</a><a href="{% url 'ventas:cuentas_por_cobrar' %}" class="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold text-slate-700">Cuentas por cobrar</a></div>{% endif %}
+
+    {% if puede_agregar %}<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 class="mb-1 text-lg font-bold">Agregar artículos al fiado</h2><p class="mb-4 text-sm text-slate-500">El nuevo importe se suma al saldo pendiente y se descuenta del stock.</p><form method="post" action="{% url 'ventas:agregar_articulos' venta.pk %}" id="add-items-form">{% csrf_token %}<input type="hidden" name="articulos" id="add-items-json" value="[]"><div id="add-items-rows" class="space-y-3"></div><div class="mt-4 flex justify-between"><button type="button" id="add-item-row" class="text-sm font-semibold text-cyan-700"><i class="fa-solid fa-plus"></i> Agregar línea</button><button class="rounded-lg bg-slate-900 px-4 py-2 font-semibold text-white">Guardar artículos</button></div></form></section>
+    {{ productos|json_script:'pending-products-data' }}
+    <script>
+    (() => {
+        const products = JSON.parse(document.getElementById('pending-products-data').textContent);
+        const rows = document.getElementById('add-items-rows');
+        const payload = document.getElementById('add-items-json');
+        function update() {
+            payload.value = JSON.stringify([...rows.querySelectorAll('.pending-item')].map(row => ({producto_id: row.querySelector('select').value, cantidad: row.querySelector('input').value})).filter(item => item.producto_id));
+        }
+        function addRow() {
+            const row = document.createElement('div');
+            row.className = 'pending-item flex flex-wrap gap-2';
+            const select = document.createElement('select');
+            select.className = 'min-w-56 flex-1 rounded-lg border border-slate-300 px-3 py-2';
+            select.innerHTML = '<option value="">Selecciona producto</option>';
+            for (const product of products) { const option = document.createElement('option'); option.value = product.id; option.textContent = `${product.nombre} (${product.cantidad} disponibles)`; select.append(option); }
+            const quantity = document.createElement('input'); quantity.type = 'number'; quantity.min = '1'; quantity.value = '1'; quantity.className = 'w-24 rounded-lg border border-slate-300 px-3 py-2';
+            const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'px-3 text-slate-500 hover:text-red-600'; remove.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            remove.addEventListener('click', () => { row.remove(); update(); });
+            select.addEventListener('change', update); quantity.addEventListener('input', update);
+            row.append(select, quantity, remove); rows.append(row);
+        }
+        document.getElementById('add-item-row').addEventListener('click', addRow);
+        addRow();
+    })();
+    </script>{% endif %}
+</div>
+{% endblock %}

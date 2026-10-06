@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block contenido %}
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+        <div><p class="text-sm font-semibold uppercase text-cyan-700">Punto de venta</p><h1 class="text-3xl font-bold text-slate-900">Historial de ventas</h1></div>
+        <a href="{% url 'ventas:nueva_venta' %}" class="rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white hover:bg-emerald-700"><i class="fa-solid fa-cart-plus"></i> Nueva venta</a>
+    </div>
+
+    <form method="get" class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 lg:grid-cols-5">
+        <label class="text-sm font-semibold text-slate-700">Buscar cliente o factura<input name="q" value="{{ filtros.q }}" placeholder="Nombre, cédula o # factura" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"></label>
+        <label class="text-sm font-semibold text-slate-700">Desde<input type="date" name="desde" value="{{ filtros.desde }}" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"></label>
+        <label class="text-sm font-semibold text-slate-700">Hasta<input type="date" name="hasta" value="{{ filtros.hasta }}" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"></label>
+        {% if request.user.rol == 'ADMIN' %}<label class="text-sm font-semibold text-slate-700">Sede<select name="sede" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal"><option value="">Todas</option>{% for sede in sedes %}<option value="{{ sede.pk }}" {% if filtros.sede == sede.pk|stringformat:'s' %}selected{% endif %}>{{ sede.nombre }}</option>{% endfor %}</select></label>{% endif %}
+        <div class="flex items-end gap-2"><button class="flex-1 rounded-lg bg-slate-900 px-3 py-2.5 font-semibold text-white"><i class="fa-solid fa-filter"></i> Filtrar</button><a href="{% url 'ventas:historial' %}" class="rounded-lg border border-slate-300 px-3 py-2.5 text-slate-600" title="Limpiar"><i class="fa-solid fa-rotate-left"></i></a></div>
+        <div class="flex gap-2 text-sm lg:col-span-5"><button name="exportar" value="excel" class="text-emerald-700 hover:underline"><i class="fa-solid fa-file-excel"></i> Excel</button><button name="exportar" value="pdf" class="text-red-700 hover:underline"><i class="fa-solid fa-file-pdf"></i> PDF</button></div>
+    </form>
+
+    <div class="flex flex-wrap justify-between gap-2 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm"><span class="font-semibold text-slate-600">Total facturado en resultados</span><strong class="text-xl text-slate-900">${{ total_facturado|floatformat:2 }}</strong></div>
+
+    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div class="overflow-x-auto">
+        <table class="min-w-full text-left text-sm">
+            <thead class="bg-slate-900 text-xs uppercase text-white"><tr><th class="px-4 py-3">Factura</th><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Cliente</th><th class="px-4 py-3">Sede</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3 text-right">Total</th><th class="px-4 py-3 text-right">Saldo</th><th class="px-4 py-3"></th></tr></thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for venta in ventas %}<tr class="hover:bg-slate-50"><td class="px-4 py-3 font-bold">#{{ venta.pk }}</td><td class="whitespace-nowrap px-4 py-3">{{ venta.fecha_apertura|date:'d/m/Y H:i' }}</td><td class="px-4 py-3">{{ venta.cliente.nombre_completo }}<span class="block text-xs text-slate-500">{{ venta.cliente.cedula_o_rif }}</span></td><td class="px-4 py-3">{{ venta.sede.nombre }}</td><td class="px-4 py-3"><span class="font-semibold {% if venta.tipo_pago == 'CONTADO' %}text-emerald-700{% else %}text-red-700{% endif %}">{{ venta.get_tipo_pago_display }}</span></td><td class="px-4 py-3"><span class="font-semibold {% if venta.estado == 'PAGADA' %}text-emerald-700{% else %}text-red-700{% endif %}">{{ venta.get_estado_display }}</span></td><td class="px-4 py-3 text-right">${{ venta.calcular_total|floatformat:2 }}</td><td class="px-4 py-3 text-right {% if venta.estado == 'PENDIENTE' %}font-bold text-red-700{% endif %}">${{ venta.calcular_saldo_deudor|floatformat:2 }}</td><td class="px-4 py-3 text-right"><a href="{% url 'ventas:detalle_venta' venta.pk %}" class="text-cyan-700 hover:underline">Ver</a></td></tr>
+                {% empty %}<tr><td colspan="9" class="px-4 py-12 text-center text-slate-500">No hay ventas para los filtros seleccionados.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div></div>
+    {% if pagina.paginator.num_pages > 1 %}
+        <nav class="flex items-center justify-between text-sm" aria-label="Paginación de ventas">
+            <span class="text-slate-500">Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+            <div class="flex gap-2">
+                {% if pagina.has_previous %}<a class="rounded-lg border border-slate-300 px-3 py-2 text-slate-700" href="?q={{ filtros.q|urlencode }}&desde={{ filtros.desde }}&hasta={{ filtros.hasta }}&sede={{ filtros.sede }}&page={{ pagina.previous_page_number }}">Anterior</a>{% endif %}
+                {% if pagina.has_next %}<a class="rounded-lg border border-slate-300 px-3 py-2 text-slate-700" href="?q={{ filtros.q|urlencode }}&desde={{ filtros.desde }}&hasta={{ filtros.hasta }}&sede={{ filtros.sede }}&page={{ pagina.next_page_number }}">Siguiente</a>{% endif %}
+            </div>
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,26 +1,30 @@
-# apps/usuarios/views.py
-from django.db import transaction
-from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
-from .permisos import rol_requerido
-from .models import Sede, Usuario, RegistroAuditoria
-from django.shortcuts import render, redirect, get_object_or_404
-from .forms import EditarUsuarioForm, RegistroUsuarioForm, SedeForm
+from datetime import datetime, time
+
 import openpyxl
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import HttpResponse
-from django.utils.timezone import make_aware
-from datetime import datetime
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.timezone import localdate, localtime, make_aware
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import getSampleStyleSheet
-from .models import RegistroAuditoria
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+
+from .dashboard_summary import construir_resumen_operaciones
+from .forms import EditarUsuarioForm, RegistroUsuarioForm, SedeForm
+from .models import RegistroAuditoria, Sede, Usuario
+from .permisos import rol_requerido
 
 
-# 1. Vista del Dashboard (La que causó el error)
 @login_required
 def dashboard(request):
-    return render(request, 'usuarios/dashboard.html')
+    resumen = construir_resumen_operaciones(
+        request.user,
+        sede_id=request.GET.get('sede'),
+    )
+    return render(request, 'usuarios/dashboard.html', {'resumen': resumen})
 
 @login_required
 @rol_requerido('ADMIN')
@@ -52,12 +56,6 @@ def crear_sede(request):
 
 @login_required
 @rol_requerido('ADMIN')
-def crear_usuario(request):
-    # En el próximo paso programaremos el formulario aquí
-    return render(request, 'usuarios/crear_usuario.html')
-
-@login_required
-@rol_requerido('ADMIN')
 def lista_auditoria(request):
     # 1. Obtener los parámetros del formulario GET
     modulo = request.GET.get('modulo', '')
@@ -72,12 +70,20 @@ def lista_auditoria(request):
     if modulo:
         registros = registros.filter(modulo=modulo)
     if fecha_inicio:
-        # Convertimos el string a fecha para que Postgres lo entienda
-        f_inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d')
-        registros = registros.filter(fecha__gte=make_aware(f_inicio))
+        try:
+            f_inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d')
+        except ValueError:
+            messages.error(request, 'La fecha inicial no tiene un formato válido.')
+        else:
+            registros = registros.filter(fecha__gte=make_aware(f_inicio))
     if fecha_fin:
-        f_fin = datetime.strptime(f"{fecha_fin} 23:59:59", '%Y-%m-%d %H:%M:%S')
-        registros = registros.filter(fecha__lte=make_aware(f_fin))
+        try:
+            fecha_final = datetime.strptime(fecha_fin, '%Y-%m-%d').date()
+        except ValueError:
+            messages.error(request, 'La fecha final no tiene un formato válido.')
+        else:
+            f_fin = datetime.combine(fecha_final, time.max)
+            registros = registros.filter(fecha__lte=make_aware(f_fin))
 
     # 4. Generar Reporte Excel
     if accion_exportar == 'excel':
@@ -95,7 +101,7 @@ def lista_auditoria(request):
         # Datos
         for r in registros:
             ws.append([
-                r.fecha.strftime('%Y-%m-%d %H:%M:%S'),
+                localtime(r.fecha).strftime('%Y-%m-%d %H:%M:%S'),
                 r.usuario.username if r.usuario else 'Sistema',
                 r.usuario.get_rol_display() if r.usuario else '-',
                 r.modulo,
@@ -116,13 +122,13 @@ def lista_auditoria(request):
         
         estilos = getSampleStyleSheet()
         elementos.append(Paragraph("Reporte de Auditoría - Sistema Tienda", estilos['Title']))
-        elementos.append(Paragraph(f"Registros generados el: {datetime.now().strftime('%Y-%m-%d')}", estilos['Normal']))
+        elementos.append(Paragraph(f'Registros generados el: {localdate():%Y-%m-%d}', estilos['Normal']))
         
         # Construir la estructura de la tabla
         datos_tabla = [['Fecha', 'Usuario', 'Módulo', 'Acción', 'Origen']]
         for r in registros:
             datos_tabla.append([
-                r.fecha.strftime('%Y-%m-%d %H:%M'),
+                localtime(r.fecha).strftime('%Y-%m-%d %H:%M'),
                 r.usuario.username if r.usuario else 'Sistema',
                 r.modulo,
                 r.accion,
@@ -150,34 +156,18 @@ def lista_auditoria(request):
 
 @login_required
 @rol_requerido('ADMIN')
-def panel_usuarios(request):
-    # Lógica para mostrar y crear usuarios
-    
-    # Ejemplo de cómo registrarías una auditoría cuando el ADMIN entra aquí:
-    RegistroAuditoria.objects.create(
-        usuario=request.user,
-        accion="Accedió al panel de creación de usuarios",
-        modulo="Usuarios"
-    )
-    
-    return render(request, 'usuarios/panel_usuarios.html')
-
-@login_required
-@rol_requerido('ADMIN')
 def crear_usuario(request):
     if request.method == 'POST':
         form = RegistroUsuarioForm(request.POST)
         if form.is_valid():
-            nuevo_usuario = form.save()
-            
-            # Dejar rastro en la tabla de Auditoría
-            RegistroAuditoria.objects.create(
-                usuario=request.user,
-                accion=f"Registró al empleado: {nuevo_usuario.username} ({nuevo_usuario.get_rol_display()})",
-                modulo="Usuarios"
-            )
-            
-            # Redirigir de vuelta a la tabla general
+            with transaction.atomic():
+                nuevo_usuario = form.save()
+                RegistroAuditoria.objects.create(
+                    usuario=request.user,
+                    accion=f'Registró al empleado: {nuevo_usuario.username} ({nuevo_usuario.get_rol_display()})',
+                    modulo='Usuarios',
+                    ip_origen=request.META.get('REMOTE_ADDR'),
+                )
             return redirect('lista_usuarios')
     else:
         form = RegistroUsuarioForm()
@@ -194,16 +184,15 @@ def editar_usuario(request, id):
         # Pasamos la instancia (instance) para que Django sepa que estamos actualizando, no creando
         form = EditarUsuarioForm(request.POST, instance=usuario_editar)
         if form.is_valid():
-            form.save()
-            
-            estado = "Activo" if usuario_editar.is_active else "Suspendido"
-            
-            RegistroAuditoria.objects.create(
-                usuario=request.user,
-                accion=f"Modificó perfil de: {usuario_editar.username} | Rol: {usuario_editar.get_rol_display()} | Estado: {estado}",
-                modulo="Usuarios"
-            )
-            
+            with transaction.atomic():
+                form.save()
+                estado = 'Activo' if usuario_editar.is_active else 'Suspendido'
+                RegistroAuditoria.objects.create(
+                    usuario=request.user,
+                    accion=f'Modificó perfil de: {usuario_editar.username} | Rol: {usuario_editar.get_rol_display()} | Estado: {estado}',
+                    modulo='Usuarios',
+                    ip_origen=request.META.get('REMOTE_ADDR'),
+                )
             return redirect('lista_usuarios')
     else:
         # Si es GET, cargamos el formulario con los datos actuales del usuario

@@ -1,8 +1,12 @@
-# Módulo de Inventario
+# App de Inventario
 
 Módulo de inventario del sistema administrativo POS desarrollado con Django y PostgreSQL.
 
 Permite gestionar productos por sede, controlar existencias, clasificar productos por categorías, consultar el inventario mediante filtros y mantener trazabilidad mediante auditoría.
+
+Esta documentación corresponde exclusivamente a `apps/inventario`. Para los límites entre apps y permisos globales, consulta también `apps/usuarios/README.md` y `apps/ventas/README.md`.
+
+Documentación central de permisos, sedes y auditoría: `apps/usuarios/README.md`. Reglas de venta y consumo de stock: `apps/ventas/README.md`.
 
 ## Ubicación
 
@@ -90,9 +94,12 @@ Las operaciones de crear, editar y eliminar productos generan un registro en `Re
 
 Las operaciones de escritura se ejecutan dentro de `transaction.atomic()` para evitar que el cambio de datos quede guardado sin su auditoría correspondiente.
 
+La creación de categorías es independiente y actualmente no genera un evento de auditoría; la auditoría indicada arriba corresponde a las operaciones de productos.
+
 ## Roles y permisos
 
 El sistema utiliza los roles definidos en `apps.usuarios.models.Usuario`.
+El control de inventario usa el campo de negocio `rol`; `is_superuser` de Django es independiente y no sustituye la asignación de `rol='ADMIN'`.
 
 ### Administrador (`ADMIN`)
 
@@ -298,3 +305,10 @@ System check identified no issues
 Ran 5 tests
 OK
 ```
+
+## Relación con otras apps
+
+- `usuarios`: aporta `Sede`, `Usuario` y `RegistroAuditoria`.
+- `ventas`: consulta productos por sede, conserva el precio del producto en cada detalle y descuenta existencias mediante bloqueos transaccionales. No debe alterarse el stock desde las vistas de venta; la integración está centralizada en `apps/ventas/services.py`.
+
+Para el mapa completo del sistema, cada app mantiene su propio documento: `apps/usuarios/README.md`, `apps/inventario/README.md` y `apps/ventas/README.md`.

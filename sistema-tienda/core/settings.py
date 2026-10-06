@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     #Modulos del Sistema
     'apps.inventario',
     'apps.usuarios',
+    'apps.ventas',
 ]
 
 MIDDLEWARE = [
@@ -138,7 +139,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Caracas'
 
 USE_I18N = True
 

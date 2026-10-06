@@ -24,6 +24,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('apps.usuarios.urls')), # Conectar módulo de usuarios
     path('inventario/', include('apps.inventario.urls')),
+    path('ventas/', include('apps.ventas.urls')),
 ]
 
 if settings.DEBUG:

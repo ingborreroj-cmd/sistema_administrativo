@@ -30,4 +30,5 @@ class RegistroAuditoria(models.Model):
     ip_origen = models.GenericIPAddressField(null=True, blank=True)
 
     def __str__(self):
-        return f"[{self.fecha.strftime('%Y-%m-%d %H:%M')}] {self.usuario.username} - {self.accion}"
+        nombre_usuario = self.usuario.username if self.usuario else 'Sistema'
+        return f"[{self.fecha.strftime('%Y-%m-%d %H:%M')}] {nombre_usuario} - {self.accion}"

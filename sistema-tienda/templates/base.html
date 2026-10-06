@@ -153,19 +153,12 @@
         
         <!-- Visible para TODOS -->
         <a href="{% url 'dashboard' %}"><i class="fa-solid fa-house"></i> Dashboard General</a>
-        <a href="#"><i class="fa-solid fa-cash-register"></i> Módulo de Ventas</a>
-        <a href="#"><i class="fa-solid fa-file-invoice-dollar"></i> Consultar Deudas</a>
+        <a href="{% url 'ventas:nueva_venta' %}"><i class="fa-solid fa-cash-register"></i> Nueva Venta</a>
+        <a href="{% url 'ventas:cuentas_por_cobrar' %}"><i class="fa-solid fa-file-invoice-dollar"></i> Consultar Deudas</a>
 
-        <!-- Visible desde SUPERVISOR en adelante -->
         {% if request.user.rol == 'CAJERO' or request.user.rol == 'ADMIN' %}
             <a href="{% url 'inventario:lista_productos' %}"><i class="fa-solid fa-boxes-stacked"></i> Inventario</a>
-            <a href="#"><i class="fa-solid fa-chart-pie"></i> Panel de Ventas</a>
-        {% endif %}
-
-        <!-- Visible desde ENCARGADO en adelante -->
-        {% if request.user.rol in 'ENCARGADO,ADMIN' %}
-            <a href="#"><i class="fa-solid fa-store"></i> Operaciones de Tienda</a>
-            <a href="#"><i class="fa-solid fa-tags"></i> Gestión de Productos</a>
+            <a href="{% url 'ventas:historial' %}"><i class="fa-solid fa-chart-pie"></i> Historial y Reportes</a>
         {% endif %}
 
         <!-- Visible SOLO para ADMINISTRADOR -->
