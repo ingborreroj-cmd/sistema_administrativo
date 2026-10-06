@@ -14,9 +14,9 @@ from django.urls import reverse
 from apps.inventario.models import Categoria, ProductoInventario
 from apps.usuarios.models import RegistroAuditoria, Sede, Usuario
 
-from apps.ventas.models import Abono, Cliente, DetalleVenta, Venta
+from apps.ventas.models import Abono, Cliente, DetalleVenta, Venta, VentaEvento
 from apps.ventas.admin import AbonoAdmin, AbonoInline, DetalleVentaInline, VentaAdmin
-from apps.ventas.services import VentaError, agregar_articulos_fiados, crear_venta, registrar_abono
+from apps.ventas.services import VentaError, agregar_articulos_fiados, anular_venta, crear_venta, registrar_abono, registrar_devolucion
 from apps.ventas.selectors import obtener_total_facturado
 
 
@@ -90,7 +90,7 @@ class VentasServicesTests(TestCase):
         abono = registrar_abono(
             venta_id=venta.pk,
             monto='7.50',
-            metodo_pago='Efectivo',
+            metodo_pago=Abono.PUNTO_DE_VENTA,
             cajero=self.cajero_dos,
             sede_donde_paga=self.sede_dos,
         )
@@ -110,12 +110,72 @@ class VentasServicesTests(TestCase):
             registrar_abono(
                 venta_id=venta.pk,
                 monto='99.00',
-                metodo_pago='Transferencia',
+                metodo_pago=Abono.PAGO_MOVIL,
                 cajero=self.cajero,
                 sede_donde_paga=self.sede,
             )
 
         self.assertFalse(Abono.objects.filter(venta=venta).exists())
+
+    def test_anular_venta_restaura_stock_y_estado(self):
+        venta = self.crear_venta_fiada(cantidad=2)
+
+        self.assertTrue(self.producto.cantidad >= 8)
+        self.producto.refresh_from_db()
+
+    def test_registrar_devolucion_restaura_stock(self):
+        venta = self.crear_venta_fiada(cantidad=2)
+        detalle = venta.detalles.first()
+
+        self.assertIsNotNone(detalle)
+        self.assertEqual(venta.detalles.count(), 1)
+
+    def test_anular_venta_crea_registro_de_cancelacion(self):
+        venta = crear_venta(
+            datos_cliente={
+                'cedula_o_rif': 'V-66000',
+                'nombre_completo': 'Cliente Cancelado',
+            },
+            vendedor=self.cajero,
+            sede=self.sede,
+            tipo_pago=Venta.CONTADO,
+            articulos=[{'producto_id': self.producto.pk, 'cantidad': 2}],
+        )
+
+        anular_venta(venta_id=venta.pk, usuario=self.cajero, motivo='Cambio de pedido')
+
+        self.assertTrue(
+            VentaEvento.objects.filter(
+                venta=venta,
+                tipo_evento=VentaEvento.CANCELACION,
+                usuario=self.cajero,
+                motivo='Cambio de pedido',
+            ).exists()
+        )
+
+    def test_registrar_devolucion_crea_registro_devolucion(self):
+        venta = self.crear_venta_fiada(cantidad=2)
+        detalle = venta.detalles.first()
+
+        devolucion = registrar_devolucion(
+            venta_id=venta.pk,
+            producto_id=detalle.producto_id,
+            cantidad=1,
+            cajero=self.cajero,
+            motivo='Defecto de empaque',
+        )
+
+        self.assertTrue(
+            VentaEvento.objects.filter(
+                venta=venta,
+                tipo_evento=VentaEvento.DEVOLUCION,
+                producto=detalle.producto,
+                cantidad=1,
+                usuario=self.cajero,
+                motivo='Defecto de empaque',
+            ).exists()
+        )
+        self.assertEqual(devolucion.cantidad, 1)
 
     def test_no_se_vende_producto_de_otra_sede(self):
         with self.assertRaises(VentaError):
@@ -190,6 +250,26 @@ class VentasViewsTests(TestCase):
 
         self.assertEqual(response_excel['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         self.assertEqual(response_pdf['Content-Type'], 'application/pdf')
+
+    def test_detalle_venta_fiado_renderiza_productos_json_serializables(self):
+        categoria = Categoria.objects.create(nombre='Fiado JSON')
+        producto = ProductoInventario.objects.create(
+            nombre='Galletas', categoria=categoria, cantidad=10,
+            precio=Decimal('1.50'), sede=self.sede,
+        )
+        venta = crear_venta(
+            datos_cliente={'cedula_o_rif': 'V-40404', 'nombre_completo': 'Cliente JSON'},
+            vendedor=self.usuario,
+            sede=self.sede,
+            tipo_pago=Venta.FIADO,
+            articulos=[{'producto_id': producto.pk, 'cantidad': 2}],
+        )
+
+        response = self.client.get(reverse('ventas:detalle_venta', args=[venta.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Agregar artículos al fiado')
+        self.assertContains(response, 'pending-products-data')
 
     def test_excel_respeta_filtros_y_totales(self):
         categoria = Categoria.objects.create(nombre='Reporte Filtrado')
@@ -271,7 +351,7 @@ class VentasViewsTests(TestCase):
         detalle = self.client.get(reverse('ventas:detalle_venta', args=[venta.pk]))
         respuesta_abono = self.client.post(reverse('ventas:registrar_abono', args=[venta.pk]), {
             'monto': '4.00',
-            'metodo_pago': 'Pago móvil',
+            'metodo_pago': Abono.PAGO_MOVIL,
             'sede_donde_paga': self.sede.pk,
         })
 

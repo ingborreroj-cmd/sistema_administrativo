@@ -42,7 +42,13 @@ class AbonoForm(forms.Form):
         label='Monto del abono',
         widget=forms.NumberInput(attrs={'min': '0.01', 'step': '0.01'}),
     )
-    metodo_pago = forms.CharField(max_length=50, label='Método de pago')
+    metodo_pago = forms.ChoiceField(
+        choices=[
+            ('PUNTO_DE_VENTA', 'Punto de venta'),
+            ('PAGO_MOVIL', 'Pago móvil'),
+        ],
+        label='Método de pago',
+    )
     sede_donde_paga = forms.ModelChoiceField(queryset=Sede.objects.none(), label='Sede receptora')
 
     def __init__(self, *args, sedes=None, **kwargs):
@@ -50,3 +56,24 @@ class AbonoForm(forms.Form):
         for field in self.fields.values():
             field.widget.attrs['class'] = INPUT_CLASS
         self.fields['sede_donde_paga'].queryset = sedes if sedes is not None else Sede.objects.none()
+
+
+class DevolucionForm(forms.Form):
+    producto = forms.ChoiceField(label='Producto a devolver')
+    cantidad = forms.IntegerField(min_value=1, label='Cantidad a devolver')
+    motivo = forms.CharField(
+        max_length=120,
+        required=False,
+        label='Motivo de la devolución',
+        widget=forms.TextInput(attrs={'placeholder': 'Ej. Producto defectuoso'}),
+    )
+
+    def __init__(self, *args, venta=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs['class'] = INPUT_CLASS
+        if venta is not None:
+            opciones = []
+            for detalle in venta.detalles.select_related('producto').all():
+                opciones.append((str(detalle.producto_id), f'{detalle.producto.nombre} ({detalle.cantidad} vendidos)'))
+            self.fields['producto'].choices = opciones

@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.inventario.models import ProductoInventario
 from apps.usuarios.models import RegistroAuditoria
 
-from .models import Abono, Cliente, DetalleVenta, Venta
+from .models import Abono, Cliente, Devolucion, DetalleVenta, Venta, VentaEvento
 
 
 class VentaError(ValueError):
@@ -20,6 +20,27 @@ def _auditar(usuario, accion, request=None):
         modulo='Ventas',
         ip_origen=request.META.get('REMOTE_ADDR') if request else None,
     )
+
+
+def _registrar_evento_venta(*, venta, tipo_evento, usuario, motivo='', producto=None, cantidad=None, monto_total=None, request=None):
+    motivo_normalizado = (motivo or '')[:180]
+    evento = VentaEvento.objects.create(
+        venta=venta,
+        tipo_evento=tipo_evento,
+        producto=producto,
+        cantidad=cantidad,
+        motivo=motivo_normalizado,
+        monto_total=monto_total or Decimal('0.00'),
+        usuario=usuario,
+        sede=venta.sede,
+    )
+    _auditar(
+        usuario,
+        f'{"Canceló" if tipo_evento == VentaEvento.CANCELACION else "Registró devolución"} la venta #{venta.pk}'
+        + (f' ({motivo or "sin motivo"})' if motivo else ''),
+        request,
+    )
+    return evento
 
 
 def _normalizar_articulos(articulos):
@@ -165,6 +186,10 @@ def registrar_abono(*, venta_id, monto, metodo_pago, cajero, sede_donde_paga, re
     if cajero.rol != 'ADMIN' and cajero.sede_id != sede_donde_paga.pk:
         raise VentaError('El abono debe registrarse en la sede asignada al cajero.')
 
+    metodos_permitidos = {Abono.PUNTO_DE_VENTA, Abono.PAGO_MOVIL}
+    if metodo_pago not in metodos_permitidos:
+        raise VentaError('El método de pago permitido es: Punto de venta o Pago móvil.')
+
     try:
         monto = Decimal(str(monto))
     except (InvalidOperation, TypeError, ValueError):
@@ -193,3 +218,70 @@ def registrar_abono(*, venta_id, monto, metodo_pago, cajero, sede_donde_paga, re
         request,
     )
     return abono
+
+
+@transaction.atomic
+def anular_venta(*, venta_id, usuario, motivo='', request=None):
+    venta = Venta.objects.select_for_update().select_related('cliente', 'sede').get(pk=venta_id)
+    if venta.estado == Venta.CANCELADA:
+        raise VentaError('La venta ya está cancelada.')
+    if venta.tipo_pago == Venta.FIADO and venta.calcular_saldo_deudor() > 0:
+        raise VentaError('No puedes cancelar una venta fiada con saldo pendiente.')
+
+    for detalle in venta.detalles.select_related('producto').all():
+        detalle.producto.cantidad += detalle.cantidad
+        detalle.producto.fecha_actualizacion = timezone.now()
+        detalle.producto.save(update_fields=['cantidad', 'fecha_actualizacion'])
+
+    venta.estado = Venta.CANCELADA
+    venta.fecha_actualizacion = timezone.now()
+    venta.save(update_fields=['estado', 'fecha_actualizacion'])
+    _registrar_evento_venta(
+        venta=venta,
+        tipo_evento=VentaEvento.CANCELACION,
+        usuario=usuario,
+        motivo=motivo,
+        monto_total=venta.calcular_total(),
+        request=request,
+    )
+    return venta
+
+
+@transaction.atomic
+def registrar_devolucion(*, venta_id, producto_id, cantidad, cajero, motivo='', request=None):
+    venta = Venta.objects.select_for_update().select_related('cliente', 'sede').get(pk=venta_id)
+    detalle = venta.detalles.select_related('producto').get(producto_id=producto_id)
+    if cantidad <= 0 or cantidad > detalle.cantidad:
+        raise VentaError('La cantidad a devolver no es válida.')
+
+    producto = detalle.producto
+    producto.cantidad += cantidad
+    producto.fecha_actualizacion = timezone.now()
+    producto.save(update_fields=['cantidad', 'fecha_actualizacion'])
+
+    devolucion = Devolucion.objects.create(
+        venta=venta,
+        producto=producto,
+        cantidad=cantidad,
+        motivo=motivo,
+        cajero=cajero,
+        sede=venta.sede,
+    )
+    if cantidad == detalle.cantidad:
+        detalle.delete()
+    else:
+        detalle.cantidad -= cantidad
+        detalle.subtotal = detalle.precio_unitario * detalle.cantidad
+        detalle.save(update_fields=['cantidad', 'subtotal'])
+
+    _registrar_evento_venta(
+        venta=venta,
+        tipo_evento=VentaEvento.DEVOLUCION,
+        usuario=cajero,
+        producto=producto,
+        cantidad=cantidad,
+        motivo=motivo,
+        monto_total=detalle.precio_unitario * cantidad,
+        request=request,
+    )
+    return devolucion

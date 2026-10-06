@@ -15,6 +15,11 @@
 
     {% if venta.estado == 'PENDIENTE' %}<div class="flex flex-wrap gap-3"><a href="{% url 'ventas:registrar_abono' venta.pk %}" class="rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white hover:bg-emerald-700"><i class="fa-solid fa-hand-holding-dollar"></i> Registrar abono</a><a href="{% url 'ventas:cuentas_por_cobrar' %}" class="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold text-slate-700">Cuentas por cobrar</a></div>{% endif %}
 
+    {% if venta.estado != 'CANCELADA' %}<div class="flex flex-wrap gap-3">
+        <a href="{% url 'ventas:devolucion_venta' venta.pk %}" class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 font-semibold text-amber-800">Devolución</a>
+        <a href="{% url 'ventas:cancelar_venta' venta.pk %}" class="rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 font-semibold text-red-700">Cancelar venta</a>
+    </div>{% endif %}
+
     {% if puede_agregar %}<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 class="mb-1 text-lg font-bold">Agregar artículos al fiado</h2><p class="mb-4 text-sm text-slate-500">El nuevo importe se suma al saldo pendiente y se descuenta del stock.</p><form method="post" action="{% url 'ventas:agregar_articulos' venta.pk %}" id="add-items-form">{% csrf_token %}<input type="hidden" name="articulos" id="add-items-json" value="[]"><div id="add-items-rows" class="space-y-3"></div><div class="mt-4 flex justify-between"><button type="button" id="add-item-row" class="text-sm font-semibold text-cyan-700"><i class="fa-solid fa-plus"></i> Agregar línea</button><button class="rounded-lg bg-slate-900 px-4 py-2 font-semibold text-white">Guardar artículos</button></div></form></section>
     {{ productos|json_script:'pending-products-data' }}
     <script>

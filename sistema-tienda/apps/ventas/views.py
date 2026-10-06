@@ -10,11 +10,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.inventario.models import ProductoInventario
 from apps.usuarios.models import Sede
 
-from .forms import AbonoForm, VentaForm
-from .models import Cliente, Venta
+from .forms import AbonoForm, DevolucionForm, VentaForm
+from .models import Cliente, Devolucion, Venta
 from .reports import exportar_excel, exportar_pdf
 from .selectors import obtener_total_facturado, ventas_filtradas
-from .services import VentaError, agregar_articulos_fiados, crear_venta, registrar_abono
+from .services import VentaError, agregar_articulos_fiados, anular_venta, crear_venta, registrar_abono, registrar_devolucion
 
 
 def _sedes_usuario(usuario):
@@ -138,7 +138,11 @@ def detalle_venta(request, pk):
     )
     productos = []
     if puede_agregar:
-        productos = ProductoInventario.objects.filter(sede=venta.sede, cantidad__gt=0).order_by('nombre')
+        productos = list(
+            ProductoInventario.objects.filter(sede=venta.sede, cantidad__gt=0)
+            .order_by('nombre')
+            .values('id', 'nombre', 'precio', 'cantidad')
+        )
 
     return render(request, 'ventas/detalle_venta.html', {
         'venta': venta,
@@ -223,3 +227,54 @@ def registrar_abono_view(request, pk):
         'venta': venta,
         'saldo': venta.calcular_saldo_deudor(),
     })
+
+
+@login_required
+def devolucion_venta(request, pk):
+    venta = get_object_or_404(Venta.objects.select_related('cliente', 'sede').prefetch_related('detalles__producto'), pk=pk)
+    if request.user.rol != 'ADMIN' and request.user.sede_id != venta.sede_id:
+        messages.error(request, 'Solo puedes devolver artículos desde la sede de la venta.')
+        return redirect('ventas:detalle_venta', pk=pk)
+
+    if request.method == 'POST':
+        form = DevolucionForm(request.POST, venta=venta)
+        if form.is_valid():
+            try:
+                cantidad = int(form.cleaned_data['cantidad'])
+                registrar_devolucion(
+                    venta_id=venta.pk,
+                    producto_id=int(form.cleaned_data['producto']),
+                    cantidad=cantidad,
+                    cajero=request.user,
+                    motivo=form.cleaned_data['motivo'],
+                    request=request,
+                )
+            except VentaError as error:
+                form.add_error(None, str(error))
+            else:
+                messages.success(request, 'Devolución registrada y stock restaurado.')
+                return redirect('ventas:detalle_venta', pk=venta.pk)
+    else:
+        form = DevolucionForm(venta=venta)
+
+    return render(request, 'ventas/devolucion.html', {'form': form, 'venta': venta})
+
+
+@login_required
+def cancelar_venta(request, pk):
+    venta = get_object_or_404(Venta.objects.select_related('cliente', 'sede'), pk=pk)
+    if request.user.rol != 'ADMIN' and request.user.sede_id != venta.sede_id:
+        messages.error(request, 'Solo puedes cancelar ventas desde la sede correspondiente.')
+        return redirect('ventas:detalle_venta', pk=pk)
+
+    if request.method == 'POST':
+        motivo = request.POST.get('motivo', '').strip()
+        try:
+            anular_venta(venta_id=venta.pk, usuario=request.user, motivo=motivo, request=request)
+        except VentaError as error:
+            messages.error(request, str(error))
+        else:
+            messages.success(request, f'Venta #{venta.pk} cancelada correctamente.')
+            return redirect('ventas:detalle_venta', pk=venta.pk)
+
+    return render(request, 'ventas/cancelar_venta.html', {'venta': venta})

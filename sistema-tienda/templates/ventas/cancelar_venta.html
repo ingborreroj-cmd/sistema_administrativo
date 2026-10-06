@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block contenido %}
+<div class="mx-auto max-w-xl space-y-5">
+    <div>
+        <a href="{% url 'ventas:detalle_venta' venta.pk %}" class="text-sm font-semibold text-slate-500 hover:text-cyan-700"><i class="fa-solid fa-arrow-left"></i> Volver a factura #{{ venta.pk }}</a>
+        <h1 class="mt-2 text-3xl font-bold text-slate-900">Cancelar venta</h1>
+    </div>
+
+    <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+        <p class="font-semibold text-slate-800">{{ venta.cliente.nombre_completo }} · Factura #{{ venta.pk }}</p>
+        <p class="mt-1 text-sm text-slate-600">Total: ${{ venta.calcular_total|floatformat:2 }}</p>
+        <p class="mt-2 text-sm text-red-700">La cancelación solo es permitida si la deuda está saldada o la venta es de contado.</p>
+    </div>
+
+    <form method="post" class="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        {% csrf_token %}
+        <div>
+            <label for="motivo" class="text-sm font-semibold text-slate-700">Motivo</label>
+            <input id="motivo" name="motivo" type="text" maxlength="120" placeholder="Ej. Error de venta o comprobante duplicado" class="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-100">
+        </div>
+        <div class="flex justify-end gap-3 border-t border-slate-100 pt-5">
+            <a href="{% url 'ventas:detalle_venta' venta.pk %}" class="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700">Cancelar</a>
+            <button class="rounded-lg bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700"><i class="fa-solid fa-ban"></i> Confirmar cancelación</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

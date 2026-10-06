@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Abono, Cliente, DetalleVenta, Venta
+from .models import Abono, Cliente, DetalleVenta, Venta, VentaEvento
 
 
 class DetalleVentaInline(admin.TabularInline):
@@ -57,6 +57,20 @@ class AbonoAdmin(admin.ModelAdmin):
     list_filter = ['metodo_pago', 'sede_donde_paga', 'fecha']
     search_fields = ['venta__cliente__nombre_completo', 'venta__cliente__cedula_o_rif']
     readonly_fields = ['venta', 'monto', 'fecha', 'metodo_pago', 'cajero', 'sede_donde_paga']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VentaEvento)
+class VentaEventoAdmin(admin.ModelAdmin):
+    list_display = ['fecha', 'tipo_evento', 'venta', 'producto', 'cantidad', 'monto_total', 'usuario', 'sede']
+    list_filter = ['tipo_evento', 'sede', 'fecha']
+    search_fields = ['venta__cliente__nombre_completo', 'venta__cliente__cedula_o_rif', 'motivo']
+    readonly_fields = ['venta', 'tipo_evento', 'producto', 'cantidad', 'motivo', 'monto_total', 'usuario', 'sede', 'fecha']
 
     def has_add_permission(self, request):
         return False

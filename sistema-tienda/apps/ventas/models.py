@@ -27,6 +27,7 @@ class Venta(models.Model):
     FIADO = 'FIADO'
     PAGADA = 'PAGADA'
     PENDIENTE = 'PENDIENTE'
+    CANCELADA = 'CANCELADA'
 
     TIPOS_PAGO = (
         (CONTADO, 'Pago al contado'),
@@ -35,6 +36,7 @@ class Venta(models.Model):
     ESTADOS = (
         (PAGADA, 'Pagada totalmente'),
         (PENDIENTE, 'Pendiente por pagar'),
+        (CANCELADA, 'Cancelada'),
     )
 
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='ventas')
@@ -56,6 +58,7 @@ class Venta(models.Model):
                 condition=(
                     Q(tipo_pago='CONTADO', estado='PAGADA')
                     | Q(tipo_pago='FIADO', estado__in=['PAGADA', 'PENDIENTE'])
+                    | Q(estado='CANCELADA')
                 ),
                 name='ventas_estado_pago_coherente',
             ),
@@ -99,10 +102,18 @@ class DetalleVenta(models.Model):
 
 
 class Abono(models.Model):
+    PUNTO_DE_VENTA = 'PUNTO_DE_VENTA'
+    PAGO_MOVIL = 'PAGO_MOVIL'
+
+    METODOS_PAGO = (
+        (PUNTO_DE_VENTA, 'Punto de venta'),
+        (PAGO_MOVIL, 'Pago móvil'),
+    )
+
     venta = models.ForeignKey(Venta, on_delete=models.CASCADE, related_name='abonos')
     monto = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     fecha = models.DateTimeField(auto_now_add=True)
-    metodo_pago = models.CharField(max_length=50)
+    metodo_pago = models.CharField(max_length=20, choices=METODOS_PAGO)
     cajero = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='abonos_registrados')
     sede_donde_paga = models.ForeignKey(Sede, on_delete=models.PROTECT, related_name='abonos_recibidos')
 
@@ -114,3 +125,56 @@ class Abono(models.Model):
 
     def __str__(self):
         return f'Abono {self.monto} a Venta #{self.venta_id}'
+
+
+class Devolucion(models.Model):
+    venta = models.ForeignKey(Venta, on_delete=models.PROTECT, related_name='devoluciones')
+    producto = models.ForeignKey(ProductoInventario, on_delete=models.PROTECT, related_name='devoluciones')
+    cantidad = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    motivo = models.CharField(max_length=120, blank=True)
+    fecha = models.DateTimeField(auto_now_add=True)
+    cajero = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='devoluciones_registradas')
+    sede = models.ForeignKey(Sede, on_delete=models.PROTECT, related_name='devoluciones')
+
+    class Meta:
+        ordering = ['-fecha', '-id']
+
+    def __str__(self):
+        return f'Devolución de {self.cantidad} x {self.producto.nombre} a Venta #{self.venta_id}'
+
+
+class VentaEvento(models.Model):
+    CANCELACION = 'CANCELACION'
+    DEVOLUCION = 'DEVOLUCION'
+
+    TIPOS_EVENTO = (
+        (CANCELACION, 'Cancelación de venta'),
+        (DEVOLUCION, 'Devolución de venta'),
+    )
+
+    venta = models.ForeignKey(Venta, on_delete=models.PROTECT, related_name='eventos')
+    tipo_evento = models.CharField(max_length=20, choices=TIPOS_EVENTO)
+    producto = models.ForeignKey(
+        ProductoInventario,
+        on_delete=models.PROTECT,
+        related_name='eventos_venta',
+        null=True,
+        blank=True,
+    )
+    cantidad = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+    motivo = models.CharField(max_length=180, blank=True, default='')
+    monto_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    usuario = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='eventos_venta')
+    sede = models.ForeignKey(Sede, on_delete=models.PROTECT, related_name='eventos_venta')
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-fecha', '-id']
+        indexes = [
+            models.Index(fields=['tipo_evento', 'fecha'], name='venta_evento_tipo_fecha_idx'),
+            models.Index(fields=['venta', 'tipo_evento'], name='venta_evento_venta_tipo_idx'),
+        ]
+
+    def __str__(self):
+        nombre = self.producto.nombre if self.producto else 'Venta'
+        return f'{self.get_tipo_evento_display()} - {nombre} ({self.venta_id})'
